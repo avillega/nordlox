@@ -1,0 +1,22 @@
+{
+    var a = "foo";
+    {
+        var x  = "waa1";
+        var x0 = "waa";
+        var x1 = "waa";
+        var x2 = "waa";
+        var x3 = "waa";
+        var x4 = "waa";
+        print x;
+        var y1 = "yaa";
+        var y2 = "yaa";
+        var y3 = "yaa";
+        var y4 = "yaa";
+        y1 = "yee";
+        {
+            var zz = 1;
+        }
+        print y1;
+    }
+    var b = "bar";
+}

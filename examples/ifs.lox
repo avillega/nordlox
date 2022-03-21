@@ -1,0 +1,14 @@
+{
+    if (3 < 4) {
+        var a = "3 < 4";
+        print a;
+    } else {
+        print "Shouldn't enter here";
+    }
+
+    if (3 > 4) {
+        print "Shouldn't enter here";
+    } else {
+        print "!(3>4)";
+    }
+}

@@ -1,0 +1,20 @@
+123.32
+"Hello Word"
+; != //This is a commet
+!= == < <= > >= . ( ) {} 
+and
+class
+else
+false
+for
+fun
+if
+nil
+or
+print
+return
+super
+this
+true
+var
+while
