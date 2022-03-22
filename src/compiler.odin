@@ -169,6 +169,8 @@ statement :: proc() {
         if_stmt()
     case match_parser(.While):
         while_stmt()
+    case match_parser(.For):
+        for_stmt()
     case :
         expression_stmt()
     }
@@ -243,6 +245,49 @@ while_stmt :: proc() {
 
     patch_jmp(exit_jmp)
     emit_op(.Op_Pop)
+}
+
+for_stmt :: proc() {
+    begin_scope()
+    consume(.Left_Paren, "Expect '(' after for.")
+
+    if match_parser(.Semicolon) {
+        // do nothing
+    } else if match_parser(.Var) {
+        var_decl()
+    } else {
+        expression_stmt()
+    }
+    
+    loop_start := len(current_chunk().code)
+    exit_jmp := -1
+    if !match_parser(.Semicolon) {
+        expression()
+        consume(.Semicolon, "Expect ';' after loop condition.")
+        exit_jmp = emit_jmp(.Op_Jmp_False)
+        emit_op(.Op_Pop)
+    }
+
+    if !match_parser(.Right_Paren) {
+        body_jmp := emit_jmp(.Op_Jmp)
+        increment_start := len(current_chunk().code)
+
+        expression()
+        emit_op(.Op_Pop)
+        consume(.Right_Paren, "Expect ')' after for clauses.")
+
+        emit_loop(loop_start)
+        loop_start = increment_start
+        patch_jmp(body_jmp)
+    }
+
+    statement();
+    emit_loop(loop_start)
+    if exit_jmp != -1 {
+        patch_jmp(exit_jmp)
+        emit_op(.Op_Pop)
+    }
+    end_scope()
 }
 
 patch_jmp :: proc(offset: int) {
