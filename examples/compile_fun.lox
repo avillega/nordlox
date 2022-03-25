@@ -1,0 +1,5 @@
+fun compileTest() {
+    print "Compile Test";
+}
+
+print compileTest;
