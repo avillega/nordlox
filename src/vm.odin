@@ -55,20 +55,16 @@ interpret :: proc(src: []u8) -> Interpret_Result {
 	if !ok do return Interpret_Result.Compile_Error
 
 	push(&fn.obj)
-	frame := &vm.frames[vm.frame_count]
-	vm.frame_count += 1
-	frame.fn = fn
-	frame.ip = 0
-	frame.slots = vm.stack[:]
+	_call(fn, 0)
 
 	return run()
 }
 
 @(private = "file")
 run :: proc() -> Interpret_Result {
-	frame := current_frame()
 	for {
 		when (DEBUG_TRACE_EXECUTIION) {
+			frame := current_frame()
 			using vm
 			fmt.print("          ")
 			for val, idx in stack {
@@ -128,12 +124,21 @@ pop :: proc() -> Value {
 	return stack[stack_top]
 }
 
-runtime_error :: proc(format: string, args: ..any) {
+runtime_error :: proc(format: string, args: ..any) -> Interpret_Result {
 	frame := current_frame()
 	fmt.eprintf(format, ..args)
 	fmt.eprint("\n")
-	fmt.eprintf("[line %d] in script\n", frame.fn.chunk.lines[frame.ip])
-	reset_stack()
+
+	for i := vm.frame_count - 1; i >= 0; i -= 1 {
+		frame := vm.frames[i]
+		fn := frame.fn
+
+		fn_name := fn.name if fn.name != "" else "script"
+		format := "[line %d] in %s()\n" if fn.name != "" else "[line %d] in %s\n"
+		fmt.eprintf(format, fn.chunk.lines[frame.ip], fn_name)
+	}
+
+	return .Runtime_Error
 } 
 
 free_vm :: proc() {
@@ -207,7 +212,17 @@ _op_binary :: proc($op: Binary_Op) -> Op_Fn {
 }
 
 _op_ret :: proc() -> Interpret_Result {
-	return Interpret_Result.Halt
+	result := pop()
+	frame := current_frame()
+
+	vm.frame_count -= 1
+	if vm.frame_count == 0 {
+		pop()
+		return Interpret_Result.Halt
+	}
+	vm.stack_top -= frame.fn.arity + 2
+	push(result)
+	return Interpret_Result.Ok
 }
 
 _op_false :: proc() -> Interpret_Result {
@@ -327,6 +342,37 @@ _op_loop :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
+_op_call :: proc() -> Interpret_Result {
+	arg_count : int = int(read_byte())
+	return _call_value(stack_peek(arg_count), arg_count)
+}
+
+_call_value ::proc(callee: Value, arg_count: int) -> Interpret_Result {
+	if is_obj(callee) {
+		#partial switch v in callee.(^Obj).variant {
+		case ^Function:
+			return _call(v, arg_count)
+		}
+	}
+	return runtime_error("Can only call functions and classes.")
+}
+
+_call :: proc(fn: ^Function, arg_count: int) -> Interpret_Result {
+	if fn.arity != arg_count do return runtime_error("Expected %d arguments but got %d.", fn.arity, arg_count)
+	using vm
+
+	if frame_count == FRAMES_MAX do return runtime_error("Stack overflow.")
+
+	start_slot := stack_top - arg_count - 1
+	frames[frame_count] = Call_Frame{
+		fn = fn,
+		ip = 0,
+		slots = stack[start_slot:],
+	}
+	frame_count += 1
+	return Interpret_Result.Ok
+}
+
 Op_Code :: enum u8 {
 	Op_Const,
 	Op_Neg,
@@ -353,6 +399,7 @@ Op_Code :: enum u8 {
 	Op_Jmp_True,
 	Op_Jmp,
 	Op_Loop,
+	Op_Call,
 	Op_Ret,
 }
 
@@ -382,5 +429,6 @@ operations := [Op_Code]Op_Fn {
 	.Op_Jmp_True   = _op_jmp_true,
 	.Op_Jmp        = _op_jmp,
 	.Op_Loop       = _op_loop,
+	.Op_Call       = _op_call,
 	.Op_Ret        = _op_ret,
 }

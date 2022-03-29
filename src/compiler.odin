@@ -234,6 +234,8 @@ statement :: proc() {
 		end_scope()
 	case match_parser(.If):
 		if_stmt()
+	case match_parser(.Return):
+		return_stmt()
 	case match_parser(.While):
 		while_stmt()
 	case match_parser(.For):
@@ -297,6 +299,18 @@ if_stmt :: proc() {
 	if match_parser(.Else) do statement()
 	patch_jmp(else_jmp)
 	
+}
+
+return_stmt :: proc() {
+	if current.type == .Script do error("Can't return from top-level code.")
+	
+	if match_parser(.Semicolon) {
+		emit_return()
+	} else {
+		expression()
+		consume(.Semicolon, "Expect ';' after return value.")
+		emit_op(.Op_Ret)
+	}
 }
 
 while_stmt :: proc() {
@@ -453,6 +467,27 @@ binary :: proc(ctx: Compile_Ctx) {
 		emit_op(.Op_Not)
 	case: unreachable()
 	}
+}
+
+call :: proc(ctx: Compile_Ctx) {
+	arg_count := argument_list();
+	emit_op(.Op_Call)
+	emit_byte(arg_count)
+}
+
+argument_list :: proc() -> u8 {
+	arg_count : u8 = 0
+	if !check(.Right_Paren) {
+		for {
+			expression()
+			if arg_count == 255 do error("Can't have more than 255 arguments.")
+
+			arg_count += 1
+			if !match_parser(.Comma) do break
+		}
+	}
+	consume(.Right_Paren, "Expect ')' after arguments")
+	return arg_count
 }
 
 and :: proc(ctx: Compile_Ctx) {
@@ -615,6 +650,7 @@ emit_byte :: proc(b: u8) {
 }
 
 emit_return :: proc() {
+	emit_op(.Op_Nil)
 	emit_op(.Op_Ret)
 }
 
@@ -633,7 +669,7 @@ end_compiler :: proc() -> ^Function{
 }
 
 parse_rules := [Token_Type]Parse_Rule {
-	.Left_Paren    = {grouping,     nil,    .Prec_None},
+	.Left_Paren    = {grouping,     call,   .Prec_Call},
 	.Right_Paren   = {nil,          nil,    .Prec_None},
 	.Left_Brace    = {nil,          nil,    .Prec_None},
 	.Right_Brace   = {nil,          nil,    .Prec_None},

@@ -1,5 +1,7 @@
-fun compileTest() {
-    print "Compile Test";
+fun sum(a, b, c) {
+    var x = a + b + c;
+    return x;
 }
 
-print compileTest;
+var a = sum(10, 1, 2);
+print a;

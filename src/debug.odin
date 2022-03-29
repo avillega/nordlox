@@ -28,7 +28,7 @@ disassemble_instruction :: proc(chunk: ^Chunk, idx: int) -> int {
 	.Op_Nil, .Op_Not, .Op_Eql, .Op_Gt, .Op_Lt, .Op_Print, .Op_Pop:
 		return simple_instruction(instruction, idx)
 	
-	case .Op_PopN, .Op_Get_Local, .Op_Set_Local:
+	case .Op_PopN, .Op_Get_Local, .Op_Set_Local, .Op_Call:
 		return byte_instruction(instruction, chunk, idx)
 	
 	case .Op_Const, .Op_Def_Global, .Op_Get_Global, .Op_Set_Global:
