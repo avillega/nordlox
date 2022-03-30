@@ -10,6 +10,7 @@ Obj :: struct {
 	variant: union {
 		^String,
 		^Function,
+		^Native,
 	},
 }
 
@@ -23,8 +24,9 @@ new_obj :: proc($T: typeid) -> ^T {
 
 print_obj :: proc(obj: ^Obj) {
 	switch v in obj.variant {
-	case ^String: fmt.printf("%s", v.data)
+	case ^String  : fmt.printf("%s", v.data)
 	case ^Function: print_fn(v)
+	case ^Native  : print_native(v)
 	}
 }
 
@@ -35,8 +37,9 @@ is_obj_type :: proc(obj: ^Obj, $T: typeid) -> bool {
 
 free_obj :: proc(obj: ^Obj) {
 	switch v in obj.variant {
-	case ^String: free_str(v)
+	case ^String  : free_str(v)
 	case ^Function: free_fn(v)
+	case ^Native  : free_native(v)
 	}
 }
 
@@ -112,4 +115,27 @@ print_fn :: proc(f: ^Function) {
 		return
 	}
 	fmt.printf("<fn %s>", f.name)
+}
+
+// Native Functions
+
+Native_Fn :: proc(arg_count: int, args: []Value) -> Value
+
+Native :: struct {
+	using obj: Obj,
+	fn: Native_Fn,
+}
+
+new_native :: proc(fn: Native_Fn) -> ^Native {
+	native := new_obj(Native)
+	native.fn = fn
+	return native
+}
+
+print_native :: proc(native: ^Native) {
+	fmt.print("<native fn>")
+}
+
+free_native :: proc(native: ^Native) {
+	free(native)
 }

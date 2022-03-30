@@ -3,7 +3,7 @@ package nordlox
 import "core:fmt"
 import "core:mem"
 
-DEBUG_TRACE_EXECUTIION :: true
+DEBUG_TRACE_EXECUTIION :: false
 FRAMES_MAX :: 64
 STACK_MAX :: (FRAMES_MAX * U8_COUNT)
 
@@ -48,6 +48,8 @@ init_vm :: proc() {
 		globals = make(map[string]Value),
 		frame_count = 0,
 	}
+
+	define_native("clock", clock_native)
 }
 
 interpret :: proc(src: []u8) -> Interpret_Result {
@@ -220,7 +222,7 @@ _op_ret :: proc() -> Interpret_Result {
 		pop()
 		return Interpret_Result.Halt
 	}
-	vm.stack_top -= frame.fn.arity + 2
+	vm.stack_top -= frame.fn.arity + 1
 	push(result)
 	return Interpret_Result.Ok
 }
@@ -349,9 +351,15 @@ _op_call :: proc() -> Interpret_Result {
 
 _call_value ::proc(callee: Value, arg_count: int) -> Interpret_Result {
 	if is_obj(callee) {
-		#partial switch v in callee.(^Obj).variant {
+		#partial switch f in callee.(^Obj).variant {
 		case ^Function:
-			return _call(v, arg_count)
+			return _call(f, arg_count)
+		case ^Native:
+			native := f.fn
+			result := native(arg_count, vm.stack[vm.stack_top - arg_count:])
+			vm.stack_top -= arg_count + 1
+			push(result)
+			return Interpret_Result.Ok
 		}
 	}
 	return runtime_error("Can only call functions and classes.")
@@ -432,3 +440,11 @@ operations := [Op_Code]Op_Fn {
 	.Op_Call       = _op_call,
 	.Op_Ret        = _op_ret,
 }
+
+define_native :: proc(name: string, fn: Native_Fn) {
+	push(&new_native(fn).obj)
+	vm.globals[name] = vm.stack[0]
+	pop()
+}
+
+

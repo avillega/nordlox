@@ -7,7 +7,7 @@ import "core:strings"
 MAX_U8 :: 255
 MAX_U16 :: 65535
 U8_COUNT :: MAX_U8 + 1
-DEBUG_PRINT_CODE :: true
+DEBUG_PRINT_CODE :: false
 
 current : ^Compiler = ---
 
@@ -303,7 +303,7 @@ if_stmt :: proc() {
 
 return_stmt :: proc() {
 	if current.type == .Script do error("Can't return from top-level code.")
-	
+
 	if match_parser(.Semicolon) {
 		emit_return()
 	} else {

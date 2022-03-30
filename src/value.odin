@@ -46,6 +46,14 @@ as_fn :: proc(val: Value) -> ^Function {
 	return val.(^Obj).variant.(^Function)
 }
 
+is_native :: proc(val: Value) -> bool {
+	return is_obj(val) && is_obj_type(val.(^Obj), ^Native)
+}
+
+as_native :: proc(val: Value) -> ^Native {
+	return val.(^Obj).variant.(^Native)
+}
+
 is_falsy :: proc(val: Value) -> bool {
 	return val == nil || is_bool(val) && !val.(bool)
 }
