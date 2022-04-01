@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:mem"
 
-_main :: proc() {
+main :: proc() {
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 	context.allocator = mem.tracking_allocator(&track)
@@ -19,7 +19,7 @@ _main :: proc() {
 	}
 }
 
-main :: proc() {
+_main :: proc() {
 	init_vm()
 	defer free_vm()
 

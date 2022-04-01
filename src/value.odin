@@ -1,5 +1,6 @@
 package nordlox
 import "core:fmt"
+import "core:math"
 
 Value :: union {
 	f64,
@@ -66,7 +67,7 @@ value_eq :: proc(a: Value, b: Value) -> bool {
 print_value :: proc(val: Value) {
 	switch v in val {
 	case bool: fmt.print("true" if v else "false")
-	case f64 : fmt.printf("%g", v)
+	case f64 : fmt.printf("%.0f" if math.trunc_f64(v) - v == 0 else "%.3f", v)
 	case ^Obj: print_obj(v)
 	case     : fmt.print("nil")
 	}

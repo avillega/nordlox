@@ -2,6 +2,7 @@ package nordlox
 
 import "core:fmt"
 import "core:mem"
+import "core:time"
 
 DEBUG_TRACE_EXECUTIION :: false
 FRAMES_MAX :: 64
@@ -58,7 +59,6 @@ interpret :: proc(src: []u8) -> Interpret_Result {
 
 	push(&fn.obj)
 	_call(fn, 0)
-
 	return run()
 }
 
@@ -156,13 +156,13 @@ reset_stack :: proc() {
 
 Op_Fn :: proc() -> Interpret_Result
 
-_op_const :: proc() -> Interpret_Result {
+_op_const :: #force_inline proc() -> Interpret_Result {
 	constant := read_constant()
 	push(constant)
 	return Interpret_Result.Ok
 }
 
-_op_neg :: proc() -> Interpret_Result {
+_op_neg :: #force_inline proc() -> Interpret_Result {
 	if !is_number(stack_peek(0)) {
 		runtime_error("Operand must be number")
 		return Interpret_Result.Runtime_Error
@@ -172,7 +172,7 @@ _op_neg :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_op_add :: proc() -> Interpret_Result {
+_op_add :: #force_inline proc() -> Interpret_Result {
 	if is_string(stack_peek(0)) && is_string(stack_peek(1)) {
 		bstr := as_bytes(pop())
 		astr := as_bytes(pop())
@@ -191,8 +191,8 @@ Binary_Op :: enum {
 	Add, Sub, Mul, Div, Gt, Lt,
 }
 
-_op_binary :: proc($op: Binary_Op) -> Op_Fn {
-	return proc() -> Interpret_Result {
+_op_binary :: #force_inline proc($op: Binary_Op) -> Op_Fn {
+	return #force_inline proc() -> Interpret_Result {
 		if !is_number(stack_peek(0)) || !is_number(stack_peek(1)) {
 			runtime_error("Operands must be numbers.")
 			return Interpret_Result.Runtime_Error
@@ -213,7 +213,7 @@ _op_binary :: proc($op: Binary_Op) -> Op_Fn {
 	}
 }
 
-_op_ret :: proc() -> Interpret_Result {
+_op_ret :: #force_inline proc() -> Interpret_Result {
 	result := pop()
 	frame := current_frame()
 
@@ -227,58 +227,58 @@ _op_ret :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_op_false :: proc() -> Interpret_Result {
+_op_false :: #force_inline proc() -> Interpret_Result {
 	push(false)
 	return Interpret_Result.Ok
 }
 
-_op_true :: proc() -> Interpret_Result {
+_op_true :: #force_inline proc() -> Interpret_Result {
 	push(true)
 	return Interpret_Result.Ok
 }
 
-_op_nil :: proc() -> Interpret_Result {
+_op_nil :: #force_inline proc() -> Interpret_Result {
 	push({})
 	return Interpret_Result.Ok
 }
 
-_op_not :: proc() -> Interpret_Result {
+_op_not :: #force_inline proc() -> Interpret_Result {
 	push(is_falsy(pop()))
 	return Interpret_Result.Ok
 }
 
-_op_eql :: proc() -> Interpret_Result {
+_op_eql :: #force_inline proc() -> Interpret_Result {
 	b := pop()
 	a := pop()
 	push(value_eq(a, b))
 	return Interpret_Result.Ok
 }
 
-_op_print :: proc() -> Interpret_Result {
+_op_print :: #force_inline proc() -> Interpret_Result {
 	print_value(pop())
 	fmt.println()
 	return Interpret_Result.Ok
 }
 
-_op_pop :: proc() -> Interpret_Result {
+_op_pop :: #force_inline proc() -> Interpret_Result {
 	pop()
 	return Interpret_Result.Ok
 }
 
-_op_popn :: proc() -> Interpret_Result {
+_op_popn :: #force_inline proc() -> Interpret_Result {
 	n := read_byte()
 	vm.stack_top -= int(n)
 	return Interpret_Result.Ok
 }
 
-_op_def_global :: proc() -> Interpret_Result {
+_op_def_global :: #force_inline proc() -> Interpret_Result {
 	name := read_string()
 	vm.globals[name] = stack_peek(0)
 	pop()
 	return Interpret_Result.Ok
 }
 
-_op_get_global :: proc() -> Interpret_Result {
+_op_get_global :: #force_inline proc() -> Interpret_Result {
 	name := read_string()
 	val, ok := vm.globals[name]
 	if !ok {
@@ -289,7 +289,7 @@ _op_get_global :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_op_set_global :: proc() -> Interpret_Result {
+_op_set_global :: #force_inline proc() -> Interpret_Result {
 	name := read_string()
 	_, ok := vm.globals[name]
 	if !ok {
@@ -300,21 +300,21 @@ _op_set_global :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_op_get_local :: proc() -> Interpret_Result {
+_op_get_local :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	slot := read_byte()
 	push(frame.slots[slot])
 	return Interpret_Result.Ok
 }
 
-_op_set_local :: proc() -> Interpret_Result {
+_op_set_local :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	slot := read_byte()
 	frame.slots[slot] = stack_peek(0)
 	return Interpret_Result.Ok
 }
 
-_op_jmp_false :: proc() -> Interpret_Result {
+_op_jmp_false :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	offset := read_u16()
 	if (is_falsy(stack_peek(0))) do frame.ip += int(offset)
@@ -322,7 +322,7 @@ _op_jmp_false :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_op_jmp_true :: proc() -> Interpret_Result {
+_op_jmp_true :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	offset := read_u16()
 	if (!is_falsy(stack_peek(0))) do frame.ip += int(offset)
@@ -330,21 +330,21 @@ _op_jmp_true :: proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_op_jmp :: proc() -> Interpret_Result {
+_op_jmp :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	offset := read_u16()
 	frame.ip += int(offset)
 	return Interpret_Result.Ok
 }
 
-_op_loop :: proc() -> Interpret_Result {
+_op_loop :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	offset := read_u16()
 	frame.ip -= int(offset)
 	return Interpret_Result.Ok
 }
 
-_op_call :: proc() -> Interpret_Result {
+_op_call :: #force_inline proc() -> Interpret_Result {
 	arg_count : int = int(read_byte())
 	return _call_value(stack_peek(arg_count), arg_count)
 }
@@ -446,5 +446,3 @@ define_native :: proc(name: string, fn: Native_Fn) {
 	vm.globals[name] = vm.stack[0]
 	pop()
 }
-
-
