@@ -25,10 +25,11 @@ disassemble_instruction :: proc(chunk: ^Chunk, idx: int) -> int {
 
 	switch instruction {
 	case .Op_Ret, .Op_Neg, .Op_Add, .Op_Sub, .Op_Mul, .Op_Div, .Op_False, .Op_True,
-	.Op_Nil, .Op_Not, .Op_Eql, .Op_Gt, .Op_Lt, .Op_Print, .Op_Pop:
+	.Op_Nil, .Op_Not, .Op_Eql, .Op_Gt, .Op_Lt, .Op_Print, .Op_Pop, .Op_Close_Upvalue:
 		return simple_instruction(instruction, idx)
 	
-	case .Op_PopN, .Op_Get_Local, .Op_Set_Local, .Op_Call:
+	case .Op_PopN, .Op_Get_Local, .Op_Set_Local, .Op_Call, .Op_Get_Upvalue,
+	.Op_Set_Upvalue:
 		return byte_instruction(instruction, chunk, idx)
 	
 	case .Op_Const, .Op_Def_Global, .Op_Get_Global, .Op_Set_Global:
@@ -39,6 +40,25 @@ disassemble_instruction :: proc(chunk: ^Chunk, idx: int) -> int {
 	
 	case .Op_Loop:
 		return jmp_instruction(instruction, .Neg, chunk, idx)
+	
+	case .Op_Closure:
+		offset := idx
+		offset += 1
+		const_idx := chunk.code[offset]
+		offset += 1
+		fmt.printf("%-15s % 4d ", instruction, const_idx)
+		print_value(chunk.consts[const_idx])
+		fmt.println()
+
+		fn := as_fn(chunk.consts[const_idx])
+		for i in 0..<fn.upvalue_count {
+			is_local := bool(chunk.code[offset])
+			offset += 1
+			upvalue_idx := chunk.code[offset]
+			offset += 1
+			fmt.printf("%04d    |                    %s %d\n", offset - 2, is_local ? "local" : "upvalue", upvalue_idx)
+		}
+		return offset
 	
 	case:
 		unreachable()

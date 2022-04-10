@@ -1,0 +1,27 @@
+var f1;
+var f2;
+{
+  fun g() {
+    var x = "Hello";
+    var y = "World";
+    fun a() {
+      print x + y;
+    }
+
+    fun b() {
+      var tmp = y;
+      y = x;
+      x = tmp;
+    }
+
+    f1 = a;
+    f2 = b;
+  }
+  g();
+}
+
+f1();
+f2();
+f1();
+f2();
+f1();

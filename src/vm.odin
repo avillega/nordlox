@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:mem"
 import "core:time"
 
-DEBUG_TRACE_EXECUTIION :: false
+DEBUG_TRACE_EXECUTIION :: true
 FRAMES_MAX :: 64
 STACK_MAX :: (FRAMES_MAX * U8_COUNT)
 
@@ -24,10 +24,11 @@ VM :: struct {
 	strings: map[string]^String,
 	globals: map[string]Value,
 	objects: ^Obj,
+	open_upvalues: ^Obj_Upvalue,
 }
 
 Call_Frame :: struct {
-	fn: ^Function,
+	closure: ^Closure,
 	ip: int,
 	slots: []Value,
 }
@@ -58,7 +59,10 @@ interpret :: proc(src: []u8) -> Interpret_Result {
 	if !ok do return Interpret_Result.Compile_Error
 
 	push(&fn.obj)
-	_call(fn, 0)
+	closure := new_closure(fn)
+	pop()
+	push(&closure.obj)
+	_call(closure, 0)
 	return run()
 }
 
@@ -76,19 +80,31 @@ run :: proc() -> Interpret_Result {
 				fmt.print("]")
 			}
 			fmt.println()
-			disassemble_instruction(&frame.fn.chunk, frame.ip)
+			disassemble_instruction(&frame.closure.fn.chunk, frame.ip)
 		}
 
 		instruction := Op_Code(read_byte())
 		interpret_result: Interpret_Result = operations[instruction]()
-		if interpret_result != Interpret_Result.Ok do return interpret_result
+		if interpret_result != Interpret_Result.Ok {
+			when DEBUG_TRACE_EXECUTIION {
+				fmt.print("          ")
+				for val, idx in stack {
+					if idx >= stack_top do break
+					fmt.print("[")
+					print_value(val)
+					fmt.print("]")
+				}
+				fmt.println()
+			}
+			return interpret_result
+		}
 	}
 	return Interpret_Result.Ok
 }
 
 read_byte :: #force_inline proc() -> u8 {
 	using frame := current_frame()
-	res := fn.chunk.code[ip]
+	res := closure.fn.chunk.code[ip]
 	ip += 1
 	return res
 }
@@ -102,7 +118,7 @@ read_u16 :: #force_inline proc() -> u16 {
 read_constant :: #force_inline proc() -> Value {
 	frame := current_frame()
 	idx := read_byte()
-	return frame.fn.chunk.consts[idx]
+	return frame.closure.fn.chunk.consts[idx]
 }
 
 read_string :: #force_inline proc() -> string {
@@ -133,7 +149,7 @@ runtime_error :: proc(format: string, args: ..any) -> Interpret_Result {
 
 	for i := vm.frame_count - 1; i >= 0; i -= 1 {
 		frame := vm.frames[i]
-		fn := frame.fn
+		fn := frame.closure.fn
 
 		fn_name := fn.name if fn.name != "" else "script"
 		format := "[line %d] in %s()\n" if fn.name != "" else "[line %d] in %s\n"
@@ -217,12 +233,14 @@ _op_ret :: #force_inline proc() -> Interpret_Result {
 	result := pop()
 	frame := current_frame()
 
+	_close_upvalues(frame.closure.fn.arity + 1)
+
 	vm.frame_count -= 1
 	if vm.frame_count == 0 {
 		pop()
 		return Interpret_Result.Halt
 	}
-	vm.stack_top -= frame.fn.arity + 1
+	vm.stack_top -= frame.closure.fn.arity + 1
 	push(result)
 	return Interpret_Result.Ok
 }
@@ -344,6 +362,46 @@ _op_loop :: #force_inline proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
+_op_closure :: #force_inline proc() -> Interpret_Result {
+	frame := current_frame()
+	fn := as_fn(read_constant())
+	closure := new_closure(fn)
+	push(&closure.obj)
+	for upvalue in &closure.upvalues {
+		is_local := bool(read_byte())
+		index := read_byte()
+		if is_local {
+			upvalue = _capture_upvalue(&frame.slots[index], int(index))
+		} else {
+			upvalue = frame.closure.upvalues[index]
+		}
+	}
+	return Interpret_Result.Ok
+}
+
+_capture_upvalue :: proc(local: ^Value, idx: int) -> ^Obj_Upvalue {
+	prev_upvalue: ^Obj_Upvalue = nil
+	upvalue := vm.open_upvalues
+	for upvalue != nil && upvalue.location > idx {
+		prev_upvalue = upvalue
+		upvalue = upvalue.next_upvalue
+	}
+
+	if upvalue != nil && upvalue.location == idx {
+		return upvalue
+	}
+
+	created_upvalue := new_upvalue(local, idx)
+	created_upvalue.next_upvalue = upvalue
+
+	if prev_upvalue == nil {
+		vm.open_upvalues = created_upvalue
+	} else {
+		vm.open_upvalues.next_upvalue = created_upvalue
+	}
+	return created_upvalue
+}
+
 _op_call :: #force_inline proc() -> Interpret_Result {
 	arg_count : int = int(read_byte())
 	return _call_value(stack_peek(arg_count), arg_count)
@@ -352,7 +410,7 @@ _op_call :: #force_inline proc() -> Interpret_Result {
 _call_value ::proc(callee: Value, arg_count: int) -> Interpret_Result {
 	if is_obj(callee) {
 		#partial switch f in callee.(^Obj).variant {
-		case ^Function:
+		case ^Closure:
 			return _call(f, arg_count)
 		case ^Native:
 			native := f.fn
@@ -365,7 +423,7 @@ _call_value ::proc(callee: Value, arg_count: int) -> Interpret_Result {
 	return runtime_error("Can only call functions and classes.")
 }
 
-_call :: proc(fn: ^Function, arg_count: int) -> Interpret_Result {
+_call :: proc(using closure: ^Closure, arg_count: int) -> Interpret_Result {
 	if fn.arity != arg_count do return runtime_error("Expected %d arguments but got %d.", fn.arity, arg_count)
 	using vm
 
@@ -373,12 +431,41 @@ _call :: proc(fn: ^Function, arg_count: int) -> Interpret_Result {
 
 	start_slot := stack_top - arg_count - 1
 	frames[frame_count] = Call_Frame{
-		fn = fn,
+		closure = closure,
 		ip = 0,
 		slots = stack[start_slot:],
 	}
 	frame_count += 1
 	return Interpret_Result.Ok
+}
+
+_op_get_upvalue :: #force_inline proc() -> Interpret_Result {
+	frame := current_frame()
+	slot := read_byte()
+	push(frame.closure.upvalues[slot].value^)
+	return Interpret_Result.Ok
+}
+
+_op_set_upvalue :: #force_inline proc() -> Interpret_Result {
+	frame := current_frame()
+	slot := read_byte()
+	frame.closure.upvalues[slot].value^ = stack_peek(0)
+	return Interpret_Result.Ok
+}
+
+_op_close_upvalue :: proc() -> Interpret_Result {
+	_close_upvalues(vm.stack_top - 1)
+	pop()
+	return Interpret_Result.Ok
+}
+
+_close_upvalues :: proc(last: int) {
+	for vm.open_upvalues != nil && vm.open_upvalues.location >= last {	
+		upvalue := vm.open_upvalues
+		upvalue.closed = upvalue.value^
+		upvalue.value = &upvalue.closed
+		vm.open_upvalues = upvalue.next_upvalue
+	}
 }
 
 Op_Code :: enum u8 {
@@ -403,42 +490,50 @@ Op_Code :: enum u8 {
 	Op_Set_Global,
 	Op_Get_Local,
 	Op_Set_Local,
+	Op_Get_Upvalue,
+	Op_Set_Upvalue,
 	Op_Jmp_False,
 	Op_Jmp_True,
 	Op_Jmp,
 	Op_Loop,
 	Op_Call,
+	Op_Closure,
+	Op_Close_Upvalue,
 	Op_Ret,
 }
 
 operations := [Op_Code]Op_Fn {
-	.Op_Const      = _op_const,
-	.Op_Neg        = _op_neg,
-	.Op_Add        = _op_add,
-	.Op_Sub        = _op_binary(.Sub),
-	.Op_Mul        = _op_binary(.Mul),
-	.Op_Div        = _op_binary(.Div),
-	.Op_Lt         = _op_binary(.Lt),
-	.Op_Gt         = _op_binary(.Gt),
-	.Op_False      = _op_false,
-	.Op_True       = _op_true,
-	.Op_Nil        = _op_nil,
-	.Op_Not        = _op_not,
-	.Op_Eql        = _op_eql,
-	.Op_Print      = _op_print,
-	.Op_Pop        = _op_pop,
-	.Op_PopN       = _op_popn,
-	.Op_Def_Global = _op_def_global,
-	.Op_Get_Global = _op_get_global,
-	.Op_Set_Global = _op_set_global,
-	.Op_Get_Local  = _op_get_local,
-	.Op_Set_Local  = _op_set_local,
-	.Op_Jmp_False  = _op_jmp_false,
-	.Op_Jmp_True   = _op_jmp_true,
-	.Op_Jmp        = _op_jmp,
-	.Op_Loop       = _op_loop,
-	.Op_Call       = _op_call,
-	.Op_Ret        = _op_ret,
+	.Op_Const         = _op_const,
+	.Op_Neg           = _op_neg,
+	.Op_Add           = _op_add,
+	.Op_Sub           = _op_binary(.Sub),
+	.Op_Mul           = _op_binary(.Mul),
+	.Op_Div           = _op_binary(.Div),
+	.Op_Lt            = _op_binary(.Lt),
+	.Op_Gt            = _op_binary(.Gt),
+	.Op_False         = _op_false,
+	.Op_True          = _op_true,
+	.Op_Nil           = _op_nil,
+	.Op_Not           = _op_not,
+	.Op_Eql           = _op_eql,
+	.Op_Print         = _op_print,
+	.Op_Pop           = _op_pop,
+	.Op_PopN          = _op_popn,
+	.Op_Def_Global    = _op_def_global,
+	.Op_Get_Global    = _op_get_global,
+	.Op_Set_Global    = _op_set_global,
+	.Op_Get_Local     = _op_get_local,
+	.Op_Set_Local     = _op_set_local,
+	.Op_Get_Upvalue   = _op_get_upvalue,
+	.Op_Set_Upvalue   = _op_set_upvalue,
+	.Op_Jmp_False     = _op_jmp_false,
+	.Op_Jmp_True      = _op_jmp_true,
+	.Op_Jmp           = _op_jmp,
+	.Op_Loop          = _op_loop,
+	.Op_Call          = _op_call,
+	.Op_Closure       = _op_closure,
+	.Op_Close_Upvalue = _op_close_upvalue,
+	.Op_Ret           = _op_ret,
 }
 
 define_native :: proc(name: string, fn: Native_Fn) {

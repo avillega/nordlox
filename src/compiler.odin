@@ -7,7 +7,7 @@ import "core:strings"
 MAX_U8 :: 255
 MAX_U16 :: 65535
 U8_COUNT :: MAX_U8 + 1
-DEBUG_PRINT_CODE :: false
+DEBUG_PRINT_CODE :: true
 
 current : ^Compiler = ---
 
@@ -67,6 +67,7 @@ Compiler :: struct {
 	type: Function_Type,
 	locals: [U8_COUNT]Local,
 	local_count: int,
+	upvalues: [U8_COUNT]Upvalue,
 	scope_depth: int,
 }
 
@@ -86,13 +87,20 @@ init_compiler :: proc(compiler: ^Compiler, type: Function_Type) {
 	local := &current.locals[current.local_count]
 	current.local_count += 1
 	local.depth = 0
+	local.is_captured = false
 	local.name.lexeme = {}
 }
 
 
 Local :: struct {
-	name: Token,
-	depth: int,
+	name       : Token,
+	depth      : int,
+	is_captured: bool,
+}
+
+Upvalue :: struct {
+	index: u8,
+	is_local: bool,
 }
 
 Function_Type :: enum {
@@ -149,8 +157,13 @@ function :: proc(type: Function_Type) {
 	block()
 
 	fn := end_compiler()
-	emit_op(.Op_Const)
+	emit_op(.Op_Closure)
 	emit_byte(make_const(&fn.obj))
+
+	for i in 0..<fn.upvalue_count {
+		emit_byte(compiler.upvalues[i].is_local ? 1 : 0)
+		emit_byte(compiler.upvalues[i].index)
+	}
 }
 
 var_decl :: proc() {
@@ -197,8 +210,9 @@ add_local :: proc(name: Token) {
 	}
 
 	locals[local_count] = Local{
-		name = name,
-		depth = -1,
+		name        = name,
+		depth       = -1,
+		is_captured = false,
 	}
 	local_count += 1
 }
@@ -266,14 +280,13 @@ block :: proc() {
 end_scope :: proc() {
 	using current
 	scope_depth -= 1
-	n: u8 = 0
 	for local_count > 0 && locals[local_count - 1].depth > scope_depth {
-		n += 1
+		if locals[local_count - 1].is_captured {
+			emit_op(.Op_Close_Upvalue)
+		} else {
+			emit_op(.Op_Pop)
+		}
 		local_count -= 1
-	}
-	if n > 0 {
-		emit_op(.Op_PopN)
-		emit_byte(n)
 	}
 }
 
@@ -400,6 +413,9 @@ named_variable :: proc(name: Token, ctx: Compile_Ctx) {
 	if ok {
 		get_op = .Op_Get_Local
 		set_op = .Op_Set_Local
+	} else if arg, ok = resolve_upvalue(current, name); ok {
+		get_op = .Op_Get_Upvalue
+		set_op = .Op_Set_Upvalue
 	} else {
 		arg = identifier_constant(name)
 		get_op = .Op_Get_Global
@@ -414,6 +430,42 @@ named_variable :: proc(name: Token, ctx: Compile_Ctx) {
 		emit_op(get_op)
 		emit_byte(arg)
 	}
+}
+
+resolve_upvalue :: proc(compiler: ^Compiler, name: Token) -> (u8, bool) {
+	if compiler.enclosing == nil do return 0, false
+
+	local, ok := resolve_local(compiler.enclosing, name)
+	if ok {
+		compiler.enclosing.locals[local].is_captured = true
+		return add_upvalue(compiler, local, true)
+	}
+
+	upvalue, ok2 := resolve_upvalue(compiler.enclosing, name)
+	if ok2 {
+		return add_upvalue(compiler, upvalue, false)
+	}
+
+	return 0, false
+}
+
+add_upvalue :: proc(using compiler: ^Compiler, index: u8, is_local: bool) -> (u8, bool) {
+	for i in 0..<function.upvalue_count {
+		upvalue := compiler.upvalues[i]
+		if upvalue.index == index && upvalue.is_local == is_local {
+			return u8(i), true
+		}
+	}
+
+	if function.upvalue_count == U8_COUNT {
+		error("Too many closure variables in function")
+		return 0, false
+	}
+
+	upvalues[function.upvalue_count].is_local = is_local
+	upvalues[function.upvalue_count].index = index
+	function.upvalue_count += 1
+	return u8(function.upvalue_count - 1), true
 }
 
 resolve_local :: proc(compiler: ^Compiler, name: Token) -> (u8, bool) {

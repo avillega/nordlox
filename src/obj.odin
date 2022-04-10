@@ -11,6 +11,8 @@ Obj :: struct {
 		^String,
 		^Function,
 		^Native,
+		^Closure,
+		^Obj_Upvalue,
 	},
 }
 
@@ -24,9 +26,11 @@ new_obj :: proc($T: typeid) -> ^T {
 
 print_obj :: proc(obj: ^Obj) {
 	switch v in obj.variant {
-	case ^String  : fmt.printf("%s", v.data)
-	case ^Function: print_fn(v)
-	case ^Native  : print_native(v)
+	case ^String     : fmt.printf("%s", v.data)
+	case ^Function   : print_fn(v)
+	case ^Native     : print_native(v)
+	case ^Closure    : print_fn(v.fn)
+	case ^Obj_Upvalue: fmt.print("Upvalue")
 	}
 }
 
@@ -37,9 +41,11 @@ is_obj_type :: proc(obj: ^Obj, $T: typeid) -> bool {
 
 free_obj :: proc(obj: ^Obj) {
 	switch v in obj.variant {
-	case ^String  : free_str(v)
-	case ^Function: free_fn(v)
-	case ^Native  : free_native(v)
+	case ^String     : free_str(v)
+	case ^Function   : free_fn(v)
+	case ^Native     : free_native(v)
+	case ^Closure    : free_closure(v)
+	case ^Obj_Upvalue: free_upvalue(v)
 	}
 }
 
@@ -87,11 +93,33 @@ concat :: proc(a: []u8, b: []u8) -> ^Obj {
 	return &res.obj
 }
 
+// Obj_Upvalue
+Obj_Upvalue ::  struct {
+	using obj: Obj,
+	location: int,
+	value: ^Value,
+	closed: Value,
+	next_upvalue: ^Obj_Upvalue,
+}
+
+new_upvalue :: proc(value: ^Value, location: int) -> ^Obj_Upvalue {
+	upvalue := new_obj(Obj_Upvalue)
+	upvalue.value = value
+	upvalue.location = location
+	upvalue.closed = nil
+	return upvalue
+}
+
+free_upvalue :: proc(upvalue: ^Obj_Upvalue) {
+	free(upvalue)
+}
+
 // Functions
 
 Function :: struct {
 	using obj: Obj,
 	arity: int,
+	upvalue_count: int,
 	chunk: Chunk,
 	name: string,
 }
@@ -100,6 +128,7 @@ new_fn :: proc() -> ^Function {
 	function := new_obj(Function)
 	function.arity = 0
 	function.name = ""
+	function.upvalue_count = 0
 	function.chunk = Chunk{}
 	return function
 }
@@ -138,4 +167,24 @@ print_native :: proc(native: ^Native) {
 
 free_native :: proc(native: ^Native) {
 	free(native)
+}
+
+// Closures
+
+Closure :: struct {
+	using obj: Obj,
+	fn: ^Function,
+	upvalues: []^Obj_Upvalue,
+}
+
+new_closure :: proc(fn: ^Function) -> ^Closure {
+	closure := new_obj(Closure)
+	closure.fn = fn
+	closure.upvalues = make([]^Obj_Upvalue, fn.upvalue_count)
+	return closure
+}
+
+free_closure :: proc(closure: ^Closure) {
+	delete(closure.upvalues)
+	free(closure)
 }

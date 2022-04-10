@@ -55,6 +55,14 @@ as_native :: proc(val: Value) -> ^Native {
 	return val.(^Obj).variant.(^Native)
 }
 
+is_closure :: proc(val: Value) -> bool {
+	return is_obj(val) && is_obj_type(val.(^Obj), ^Closure)
+}
+
+as_closure :: proc(val: Value) -> ^Closure {
+	return val.(^Obj).variant.(^Closure)
+}
+
 is_falsy :: proc(val: Value) -> bool {
 	return val == nil || is_bool(val) && !val.(bool)
 }
