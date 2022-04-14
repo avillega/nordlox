@@ -30,6 +30,7 @@ VM :: struct {
 Call_Frame :: struct {
 	closure: ^Closure,
 	ip: int,
+	slot_start: int,
 	slots: []Value,
 }
 
@@ -233,14 +234,14 @@ _op_ret :: #force_inline proc() -> Interpret_Result {
 	result := pop()
 	frame := current_frame()
 
-	_close_upvalues(frame.closure.fn.arity + 1)
+	_close_upvalues(&frame.slots[0])
 
 	vm.frame_count -= 1
 	if vm.frame_count == 0 {
 		pop()
 		return Interpret_Result.Halt
 	}
-	vm.stack_top -= frame.closure.fn.arity + 1
+	vm.stack_top = frame.slot_start
 	push(result)
 	return Interpret_Result.Ok
 }
@@ -371,7 +372,7 @@ _op_closure :: #force_inline proc() -> Interpret_Result {
 		is_local := bool(read_byte())
 		index := read_byte()
 		if is_local {
-			upvalue = _capture_upvalue(&frame.slots[index], int(index))
+			upvalue = _capture_upvalue(&frame.slots[index])
 		} else {
 			upvalue = frame.closure.upvalues[index]
 		}
@@ -379,19 +380,19 @@ _op_closure :: #force_inline proc() -> Interpret_Result {
 	return Interpret_Result.Ok
 }
 
-_capture_upvalue :: proc(local: ^Value, idx: int) -> ^Obj_Upvalue {
+_capture_upvalue :: proc(local: ^Value) -> ^Obj_Upvalue {
 	prev_upvalue: ^Obj_Upvalue = nil
 	upvalue := vm.open_upvalues
-	for upvalue != nil && upvalue.location > idx {
+	for upvalue != nil && uintptr(upvalue.location) > uintptr(local) {
 		prev_upvalue = upvalue
 		upvalue = upvalue.next_upvalue
 	}
 
-	if upvalue != nil && upvalue.location == idx {
+	if upvalue != nil && upvalue.location == local {
 		return upvalue
 	}
 
-	created_upvalue := new_upvalue(local, idx)
+	created_upvalue := new_upvalue(local)
 	created_upvalue.next_upvalue = upvalue
 
 	if prev_upvalue == nil {
@@ -429,11 +430,12 @@ _call :: proc(using closure: ^Closure, arg_count: int) -> Interpret_Result {
 
 	if frame_count == FRAMES_MAX do return runtime_error("Stack overflow.")
 
-	start_slot := stack_top - arg_count - 1
+	slot_start := stack_top - arg_count - 1
 	frames[frame_count] = Call_Frame{
 		closure = closure,
 		ip = 0,
-		slots = stack[start_slot:],
+		slots = stack[slot_start:],
+		slot_start = slot_start,
 	}
 	frame_count += 1
 	return Interpret_Result.Ok
@@ -442,28 +444,28 @@ _call :: proc(using closure: ^Closure, arg_count: int) -> Interpret_Result {
 _op_get_upvalue :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	slot := read_byte()
-	push(frame.closure.upvalues[slot].value^)
+	push(frame.closure.upvalues[slot].location^)
 	return Interpret_Result.Ok
 }
 
 _op_set_upvalue :: #force_inline proc() -> Interpret_Result {
 	frame := current_frame()
 	slot := read_byte()
-	frame.closure.upvalues[slot].value^ = stack_peek(0)
+	frame.closure.upvalues[slot].location^ = stack_peek(0)
 	return Interpret_Result.Ok
 }
 
 _op_close_upvalue :: proc() -> Interpret_Result {
-	_close_upvalues(vm.stack_top - 1)
+	_close_upvalues(&vm.stack[vm.stack_top - 1])
 	pop()
 	return Interpret_Result.Ok
 }
 
-_close_upvalues :: proc(last: int) {
-	for vm.open_upvalues != nil && vm.open_upvalues.location >= last {	
+_close_upvalues :: proc(last: ^Value) {
+	for vm.open_upvalues != nil && uintptr(vm.open_upvalues.location) >= uintptr(last) {	
 		upvalue := vm.open_upvalues
-		upvalue.closed = upvalue.value^
-		upvalue.value = &upvalue.closed
+		upvalue.closed = upvalue.location^
+		upvalue.location = &upvalue.closed
 		vm.open_upvalues = upvalue.next_upvalue
 	}
 }

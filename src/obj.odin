@@ -96,15 +96,13 @@ concat :: proc(a: []u8, b: []u8) -> ^Obj {
 // Obj_Upvalue
 Obj_Upvalue ::  struct {
 	using obj: Obj,
-	location: int,
-	value: ^Value,
+	location: ^Value,
 	closed: Value,
 	next_upvalue: ^Obj_Upvalue,
 }
 
-new_upvalue :: proc(value: ^Value, location: int) -> ^Obj_Upvalue {
+new_upvalue :: proc(location: ^Value) -> ^Obj_Upvalue {
 	upvalue := new_obj(Obj_Upvalue)
-	upvalue.value = value
 	upvalue.location = location
 	upvalue.closed = nil
 	return upvalue
